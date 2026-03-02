@@ -1,4 +1,4 @@
-# SpendHiST (ON PROGRESS)
+# SpendHiST (IN PROGRESS)
 
 Receipt parsing API: upload receipt images (or PDFs), run OCR, parse line items and totals, and store them in PostgreSQL. Supports **English** and **Arabic** (and mixed) receipts.
 
