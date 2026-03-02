@@ -1,0 +1,44 @@
+[project]
+name = "spendhist"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "accelerate>=0.26.0",
+    "addict>=2.4.0",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "torchaudio==2.6.0",
+    "dotenv>=0.9.9",
+    "easydict>=1.13",
+    "einops>=0.8.2",
+    "fastapi>=0.129.0",
+    "psycopg2-binary>=2.9.11",
+    "pymupdf>=1.25.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.22",
+    "sqlalchemy>=2.0.46",
+    "tokenizers==0.20.3",
+    "huggingface-hub>=0.25.0",
+    "transformers==4.46.3",
+    "uvicorn>=0.41.0",
+]
+
+# PyTorch CUDA 11.8: use this index only for torch/torchvision/torchaudio
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+# Prefer CUDA wheels on Windows/Linux; macOS falls back to PyPI (no CUDA builds)
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
+    { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
