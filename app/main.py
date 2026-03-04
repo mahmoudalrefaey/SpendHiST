@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Query
 from datetime import datetime
 from pydantic import BaseModel, Field
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy.orm import Session
 from pathlib import Path
+
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from ocr import extract_text
 from parser.router import parse_receipt_text
@@ -67,14 +69,13 @@ class ReceiptResponse(ReceiptBase):
     receipt_id: int
     created_at: datetime
     items: List[ReceiptItemResponse]
-    
+
     class Config:
         from_attributes = True
 
-@app.post("/manual-receipts", response_model=ReceiptResponse)
-async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
 
-    # Create receipt object
+@app.post("/receipts", response_model=ReceiptResponse)
+async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
     new_receipt = Receipt(
         merchant_name=payload.merchant_name,
         receipt_date=payload.receipt_date,
@@ -82,22 +83,23 @@ async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
         total_taxes=payload.total_taxes,
         other=payload.other,
         currency=payload.currency,
-        raw_text=payload.raw_text
+        raw_text=payload.raw_text,
     )
 
     db.add(new_receipt)
     db.flush()
 
     for item in payload.items:
-        new_item = ReceiptItem(
-            receipt_id=new_receipt.receipt_id,
-            item_name=item.item_name,
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            line_total=item.line_total,
-            taxes=item.taxes
+        db.add(
+            ReceiptItem(
+                receipt_id=new_receipt.receipt_id,
+                item_name=item.item_name,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                line_total=item.line_total,
+                taxes=item.taxes,
+            )
         )
-        db.add(new_item)
 
     db.commit()
     db.refresh(new_receipt)
@@ -105,17 +107,83 @@ async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
     return new_receipt
 
 
-@app.get("/view-receipts/{receipt_id}", response_model=ReceiptResponse)
-async def get_receipt(receipt_id: int, db: Session = Depends(get_db)):
+@app.get("/receipts", response_model=List[ReceiptResponse])
+async def list_receipts(db: Session = Depends(get_db)):
+    receipts = (
+        db.query(Receipt)
+        .order_by(Receipt.created_at.desc())
+        .all()
+    )
+    return receipts
 
-    receipt = db.query(Receipt).filter(
-        Receipt.receipt_id == receipt_id
-    ).first()
+
+@app.get("/receipts/search", response_model=List[ReceiptResponse])
+async def search_receipts(
+    q: Optional[str] = Query(None, description="Search term for merchant, items, etc."),
+    db: Session = Depends(get_db),
+):
+    if not q:
+        return []
+
+    term = q.strip()
+    if not term:
+        return []
+
+    pattern = f"%{term}%"
+
+    query = (
+        db.query(Receipt)
+        .outerjoin(Receipt.items)
+        .filter(
+            or_(
+                Receipt.merchant_name.ilike(pattern),
+                Receipt.currency.ilike(pattern),
+                Receipt.raw_text.ilike(pattern),
+                ReceiptItem.item_name.ilike(pattern),
+            )
+        )
+        .order_by(Receipt.created_at.desc())
+        .distinct()
+    )
+
+    return query.all()
+
+
+@app.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
+async def get_receipt(receipt_id: int, db: Session = Depends(get_db)):
+    receipt = (
+        db.query(Receipt)
+        .filter(Receipt.receipt_id == receipt_id)
+        .first()
+    )
 
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     return receipt
+
+
+@app.delete("/receipts/{receipt_id}")
+async def delete_receipt(receipt_id: int, db: Session = Depends(get_db)):
+    receipt = (
+        db.query(Receipt)
+        .filter(Receipt.receipt_id == receipt_id)
+        .first()
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    db.delete(receipt)
+    db.commit()
+
+    return {"message": "Receipt deleted", "receipt_id": receipt_id}
+
+
+@app.delete("/receipts")
+async def delete_all_receipts(db: Session = Depends(get_db)):
+    deleted = db.query(Receipt).delete()
+    db.commit()
+    return {"message": "All receipts deleted", "deleted": deleted}
 
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -127,7 +195,7 @@ RAW_TEXT_DIR = _BASE_DIR / "receipts_raw"
 RAW_TEXT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@app.post("/upload-receipt")
+@app.post("/receipts/upload")
 async def upload_receipt(files: List[UploadFile] = File(...), db: Session = Depends(get_db)):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")

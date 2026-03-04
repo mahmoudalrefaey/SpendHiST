@@ -33,7 +33,7 @@ Receipt parsing API: upload receipt images (or PDFs), run OCR, parse line items 
 ### 1. Clone and enter the project
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/SpendHiST.git
+git clone https://github.com/mahmoudalrefaey/SpendHiST
 cd SpendHiST
 ```
 
@@ -72,11 +72,15 @@ API docs: **http://127.0.0.1:8000/docs**
 
 ## API overview
 
-| Method | Endpoint           | Description |
-|--------|--------------------|-------------|
-| POST   | `/receipts`        | Create a receipt from JSON (merchant, date, total, items). |
-| GET    | `/receipts/{id}`   | Get a receipt by ID with its line items. |
-| POST   | `/upload-receipt`  | Upload one or more receipt image/PDF files. Runs OCR → language detection → parser → saves receipt and items to DB. |
+| Method | Endpoint              | Description |
+|--------|-----------------------|-------------|
+| POST   | `/receipts`           | Create a receipt from JSON (merchant, date, total, items). |
+| GET    | `/receipts`           | List all receipts with their line items. |
+| GET    | `/receipts/{id}`      | Get a single receipt by ID with its line items. |
+| DELETE | `/receipts/{id}`      | Delete a single receipt by ID. |
+| DELETE | `/receipts`           | Delete all receipts in the database. |
+| GET    | `/receipts/search`    | Full-text style search across merchant, currency, raw text, and item names. |
+| POST   | `/receipts/upload`    | Upload one or more receipt image/PDF files. Runs OCR → language detection → parser → saves receipt and items to DB. |
 
 Uploaded images are stored under `receipts_img/` (created automatically).
 
@@ -85,7 +89,7 @@ Uploaded images are stored under `receipts_img/` (created automatically).
 ```
 SpendHiST/
 ├── app/
-│   ├── main.py       # FastAPI app, /receipts and /upload-receipt
+│   ├── main.py       # FastAPI app for receipts, upload, search, delete
 │   ├── db.py         # SQLAlchemy engine and session
 │   ├── models.py     # Receipt, ReceiptItem
 │   ├── ocr.py        # DeepSeek-OCR-2 text extraction (image + PDF)
