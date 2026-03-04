@@ -6,6 +6,7 @@
 # Excluded project folders
 testing/
 uploads/
+receipts_img/
 
 # Python
 __pycache__/
