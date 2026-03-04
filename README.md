@@ -98,7 +98,6 @@ SpendHiST/
 │   │   ├── en_parser.py
 │   │   └── ar_parser.py
 │   └── services.py   # (reserved)
-├── receipts_img/     # Uploaded receipt images (created at runtime)
 ├── pyproject.toml
 ├── uv.lock
 └── README.md
