@@ -15,6 +15,7 @@ from models import Receipt, ReceiptItem
 
 app = FastAPI()
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -69,8 +70,8 @@ class ReceiptResponse(ReceiptBase):
     
     class Config:
         from_attributes = True
-        
-@app.post("/receipts", response_model=ReceiptResponse)
+
+@app.post("/manual-receipts", response_model=ReceiptResponse)
 async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
 
     # Create receipt object
@@ -85,9 +86,8 @@ async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
     )
 
     db.add(new_receipt)
-    db.flush()  # Get receipt_id before commit
+    db.flush()
 
-    # Add items
     for item in payload.items:
         new_item = ReceiptItem(
             receipt_id=new_receipt.receipt_id,
@@ -104,7 +104,8 @@ async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
 
     return new_receipt
 
-@app.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
+
+@app.get("/view-receipts/{receipt_id}", response_model=ReceiptResponse)
 async def get_receipt(receipt_id: int, db: Session = Depends(get_db)):
 
     receipt = db.query(Receipt).filter(
@@ -115,21 +116,23 @@ async def get_receipt(receipt_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     return receipt
-        
-# Uploads dir: project root, so it's fixed regardless of cwd
+
+
 _BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = _BASE_DIR / "receipts_img"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+
 RAW_TEXT_DIR = _BASE_DIR / "receipts_raw"
 RAW_TEXT_DIR.mkdir(parents=True, exist_ok=True)
+
 
 @app.post("/upload-receipt")
 async def upload_receipt(files: List[UploadFile] = File(...), db: Session = Depends(get_db)):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     
-    saved = []
+    saved: List[str] = []
     for uploaded_file in files:
         
         # _______________ upload & save images ______________
@@ -173,5 +176,5 @@ async def upload_receipt(files: List[UploadFile] = File(...), db: Session = Depe
             db.add(new_item)
         db.commit()
         db.refresh(new_receipt)
-        
+
     return {"message": "Files uploaded successfully", "files": saved}

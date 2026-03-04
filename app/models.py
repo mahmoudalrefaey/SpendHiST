@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from db import Base
 
+
 class Receipt(Base):
     __tablename__ = "receipt"
     

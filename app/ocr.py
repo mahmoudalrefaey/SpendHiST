@@ -1,4 +1,4 @@
-"""Receipt OCR via DeepSeek-OCR-2. Returns raw text; parsing is in parser.py."""
+"""Receipt OCR helper: image/PDF to raw text."""
 
 import os
 import shutil

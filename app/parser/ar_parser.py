@@ -1,7 +1,4 @@
-"""
-ar_parser.py — Arabic receipt parser using Qwen2.5-1.5B-Instruct.
-
-"""
+"""Arabic receipt parser built on Qwen, shared with the English parser helpers."""
 
 import re
 from typing import Optional
