@@ -146,13 +146,6 @@ SpendHiST/
 │   ├── workflows/                 # Future: upload_pipeline, report_pipeline
 │   └── prompts/                   # Future: system + task prompt templates
 │
-├── planning/
-│   ├── architecture.md
-│   ├── backend_structure.md
-│   ├── api_design.md
-│   ├── agentic_system_design.md
-│   └── roadmap.md
-│
 ├── pyproject.toml
 ├── uv.lock
 └── README.md
