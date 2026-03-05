@@ -2,21 +2,16 @@
 en_parser.py — English receipt parser using Qwen2.5-1.5B-Instruct.
 
 Handles English and Latin-script receipts.
-Called by router.py; do not call directly from the pipeline.
+Called by dispatcher.py; do not call directly from the pipeline.
 """
 
 import json
-import os
 import re
 from typing import Optional
 
 import torch
-from dotenv import load_dotenv
 
-load_dotenv()
-
-PARSER_MODEL = os.getenv("PARSER_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
+from app.config import HF_TOKEN, PARSER_MODEL
 
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -151,7 +146,7 @@ def load_qwen():
 
 
 def _build_local_client():
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(PARSER_MODEL, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -207,7 +202,7 @@ def _strip_fences(text: str) -> str:
 
 
 def _extract_json_object(text: str) -> str:
-    """Find the first balanced { ... } block."""
+    """Find the first balanced { ... } block in the text."""
     start = text.find("{")
     if start == -1:
         return text
@@ -266,29 +261,21 @@ def _to_float(value) -> Optional[float]:
 
 def _infer_currency(raw_text: str) -> Optional[str]:
     """
-    Scan raw text for currency symbols/codes. Returns the first match.
-
-    Order is critical: unambiguous symbols ($, €, £, ₹) are checked
-    FIRST so they win before any text-based code is tried.
-    EGP is last because 'LE' overlaps common English word endings
-    (bottle, Reusable, Apple, etc.).
+    Scan raw text for currency symbols/codes.
+    Unambiguous symbols checked first to avoid false positives.
     """
     patterns = [
-        # ── Unambiguous single-character symbols ──────────────────────────
         (r"\$",                                      "USD"),
         (r"€",                                       "EUR"),
         (r"£",                                       "GBP"),
         (r"₹",                                       "INR"),
-        # ── Explicit ISO codes ────────────────────────────────────────────
         (r"\bUSD\b",                                 "USD"),
         (r"\bEUR\b",                                 "EUR"),
         (r"\bGBP\b",                                 "GBP"),
         (r"\bINR\b|\bRs\b",                          "INR"),
-        # SR is the common shorthand for Saudi Riyal on receipts
         (r"\bSAR\b|\bSR\b|ر\.س|ريال",               "SAR"),
         (r"\bAED\b|د\.إ|درهم",                       "AED"),
-
-        # preceded by a letter, avoiding "bottle", "Reusable", "Apple", etc.
+        # 'LE' checked last — prone to false matches (bottle, Apple, etc.)
         (r"\bEGP\b|(?<![a-zA-Z])LE\b|ج\.م|جنيه",   "EGP"),
     ]
     for pattern, code in patterns:
@@ -298,7 +285,7 @@ def _infer_currency(raw_text: str) -> Optional[str]:
 
 
 def _extract_tax_percent(raw_text: str) -> Optional[float]:
-    """Extract VAT/Tax percentage, e.g. VAT(14%), Tax 14%."""
+    """Extract VAT/Tax percentage from text, e.g. VAT(14%) or Tax 14%."""
     match = re.search(
         r"(?:vat|tax|ضريبة)\s*\(?\s*([\d.]+)\s*%",
         raw_text, re.IGNORECASE,
@@ -344,7 +331,7 @@ def _extract_other_charges(raw_text: str) -> Optional[float]:
 def _coerce_types(parsed: dict, raw_text: str) -> dict:
     """
     Align types with DB schema, apply currency override,
-    compute per-item taxes if a percentage is found in the text.
+    and compute per-item taxes when a VAT % is found in the text.
     """
     merchant_name = (parsed.get("merchant_name") or "").strip() or "Unknown"
 
@@ -390,7 +377,7 @@ def _coerce_types(parsed: dict, raw_text: str) -> dict:
             "taxes": 0.0,
         })
 
-    # Distribute per-item taxes if a VAT % is found
+    # Distribute per-item taxes if a VAT % is present in the raw text
     tax_pct = _extract_tax_percent(raw_text)
     if tax_pct and result["items"]:
         rate = tax_pct / 100.0
@@ -407,7 +394,7 @@ def _coerce_types(parsed: dict, raw_text: str) -> dict:
 def parse_en(raw_text: str) -> dict:
     """
     Parse an English/Latin receipt into a structured dict.
-    Called by router.py.
+    Called by dispatcher.py.
     """
     generate = load_qwen()
     prompt = _USER_PROMPT.format(raw_text=raw_text)

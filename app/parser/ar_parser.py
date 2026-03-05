@@ -1,10 +1,9 @@
-"""Arabic receipt parser built on Qwen, shared with the English parser helpers."""
+"""Arabic receipt parser — shares model and helpers with en_parser."""
 
 import re
 from typing import Optional
 
-# Reuse all shared utilities from en_parser (model loader, helpers, etc.)
-from .en_parser import (
+from app.parser.en_parser import (
     _FIX_JSON_PROMPT,
     _coerce_types,
     _to_float,
@@ -14,24 +13,22 @@ from .en_parser import (
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  ARABIC-SPECIFIC FORBIDDEN LABELS
-#  Numbers appearing on these lines must NEVER become total_amount / other.
+#  Numbers on these lines must NEVER become total_amount or other.
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Arabic labels meaning "paid" or "change/remaining" — ignore their amounts
 _PAID_LABELS = [
     "المدفوع", "الباقي", "الباقي عليه", "الباقي لك",
     "المتبقي", "الفرق", "الباقي (فكة)", "الباقي (فكه)",
     "paid", "cash", "change", "balance", "remaining",
 ]
 
-# Arabic labels that represent the true receipt total
 _TOTAL_LABELS = [
     "الإجمالي", "الاجمالي", "الإجمالى", "المجموع",
     "total", "grand total",
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  ARABIC SYSTEM PROMPT
+#  ARABIC PROMPTS
 # ═════════════════════════════════════════════════════════════════════════════
 
 _AR_SYSTEM_PROMPT = """\
@@ -103,42 +100,29 @@ Return final JSON only.\
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SAFETY POST-PROCESSING
+#  ARABIC SAFETY POST-PROCESSING
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _extract_paid_change_values(raw_text: str) -> set:
-    """
-    Extract all numeric values that appear on المدفوع/الباقي/paid/change lines.
-    These are forbidden from appearing as total_amount.
-    """
-    forbidden_values: set = set()
-    lines = raw_text.splitlines()
-    for line in lines:
-        line_lower = line.lower()
-        if any(label.lower() in line_lower for label in _PAID_LABELS):
-            # Pull every number from this line
+    """Collect all numeric values from paid/change lines — these are forbidden as totals."""
+    forbidden: set = set()
+    for line in raw_text.splitlines():
+        if any(label.lower() in line.lower() for label in _PAID_LABELS):
             for m in re.finditer(r"[\d,٠-٩]+\.?[\d,٠-٩]*", line):
                 raw_num = m.group(0).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
                 raw_num = raw_num.replace(",", "")
                 try:
-                    forbidden_values.add(float(raw_num))
+                    forbidden.add(float(raw_num))
                 except ValueError:
                     continue
-    return forbidden_values
+    return forbidden
 
 
 def _extract_valid_total(raw_text: str) -> Optional[float]:
-    """
-    Scan the receipt text for a number on a valid total line
-    (الإجمالي / المجموع / Total / Grand Total).
-    Returns the first match, or None.
-    """
-    lines = raw_text.splitlines()
-    for line in lines:
-        line_lower = line.lower()
-        if any(lbl.lower() in line_lower for lbl in _TOTAL_LABELS):
-            nums = re.findall(r"[\d,٠-٩]+\.?[\d,٠-٩]*", line)
-            for n in nums:
+    """Return the first positive number found on a recognised total label line."""
+    for line in raw_text.splitlines():
+        if any(lbl.lower() in line.lower() for lbl in _TOTAL_LABELS):
+            for n in re.findall(r"[\d,٠-٩]+\.?[\d,٠-٩]*", line):
                 raw_num = n.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
                 raw_num = raw_num.replace(",", "")
                 try:
@@ -152,28 +136,22 @@ def _extract_valid_total(raw_text: str) -> Optional[float]:
 
 def _guard_arabic_totals(parsed: dict, raw_text: str) -> dict:
     """
-    Post-processing guard for Arabic receipts.
-
-    1. Collect all numbers from المدفوع / الباقي / paid / change lines.
-    2. If total_amount equals one of those → reject it and replace with
-       a value from a valid total label (or null if none found).
-    3. Also clear 'other' if it came from a paid/change line number.
-    4. Light sanity: if total_amount < subtotal, prefer null over a wrong value.
+    Post-processing guard for Arabic receipts:
+    1. Reject total_amount if it matches a paid/change line value.
+    2. Replace with a value from a valid total label (or null).
+    3. Also clear 'other' if it came from a paid/change line.
+    4. Nullify total_amount if it's less than subtotal.
     """
     forbidden = _extract_paid_change_values(raw_text)
 
     current_total = _to_float(parsed.get("total_amount"))
     if current_total is not None and current_total in forbidden:
-        # Try to get the real total from valid labels in the raw text
-        real_total = _extract_valid_total(raw_text)
-        parsed["total_amount"] = real_total  # may be None — that is correct
+        parsed["total_amount"] = _extract_valid_total(raw_text)
 
-    # Guard 'other' too
     current_other = _to_float(parsed.get("other"))
     if current_other is not None and current_other in forbidden:
         parsed["other"] = None
 
-    # Sanity: total_amount should not be less than subtotal
     subtotal = _to_float(parsed.get("subtotal"))
     total = _to_float(parsed.get("total_amount"))
     if total is not None and subtotal is not None and total < subtotal:
@@ -189,15 +167,13 @@ def _guard_arabic_totals(parsed: dict, raw_text: str) -> dict:
 def parse_ar(raw_text: str) -> dict:
     """
     Parse an Arabic or mixed-language receipt into a structured dict.
-    Called by router.py.
+    Called by dispatcher.py.
     """
     generate = load_qwen()
 
-    # First attempt with Arabic-specific system + user prompt
     raw_response = generate(_AR_USER_PROMPT.format(raw_text=raw_text), system=_AR_SYSTEM_PROMPT)
     parsed = _try_parse_json(raw_response)
 
-    # Retry with fix prompt if JSON is broken
     if parsed is None:
         fix_prompt = _FIX_JSON_PROMPT.format(broken_json=raw_response)
         parsed = _try_parse_json(generate(fix_prompt, system=_AR_SYSTEM_PROMPT))
@@ -209,7 +185,5 @@ def parse_ar(raw_text: str) -> dict:
             "total_amount": None, "items": [],
         }
 
-    # Apply Arabic-specific total guards before coercing types
     parsed = _guard_arabic_totals(parsed, raw_text)
-
     return _coerce_types(parsed, raw_text)

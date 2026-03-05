@@ -7,6 +7,8 @@
 testing/
 uploads/
 receipts_img/
+planning/
+ai/
 
 # Python
 __pycache__/

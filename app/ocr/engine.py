@@ -1,4 +1,4 @@
-"""Receipt OCR helper: image/PDF to raw text."""
+"""Receipt OCR engine — converts image/PDF files to raw text."""
 
 import os
 import shutil
@@ -7,18 +7,11 @@ import warnings
 from pathlib import Path
 from typing import List
 
-import torch
 import fitz
+import torch
 from transformers import AutoModel, AutoTokenizer
-from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
-
-MODEL_NAME = os.getenv("MODEL_NAME_OCR")
-
-if not MODEL_NAME:
-    raise RuntimeError("MODEL_NAME_OCR is not set")
+from app.config import MODEL_NAME_OCR
 
 SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 
@@ -28,15 +21,15 @@ _model = None
 _tokenizer = None
 
 
-def _load_model():
+def _load_model() -> None:
     global _model, _tokenizer
     if _model is not None:
         return
-    _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME_OCR, trust_remote_code=True)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", module="transformers")
         _model = AutoModel.from_pretrained(
-            MODEL_NAME,
+            MODEL_NAME_OCR,
             _attn_implementation="eager",
             trust_remote_code=True,
             use_safetensors=True,
@@ -48,6 +41,7 @@ def _load_model():
 
 
 def _pdf_to_images(pdf_path: str) -> List[str]:
+    """Render every PDF page to a temporary PNG file."""
     doc = fitz.open(pdf_path)
     paths: List[str] = []
     for page_idx in range(len(doc)):
@@ -64,6 +58,7 @@ def _pdf_to_images(pdf_path: str) -> List[str]:
 
 
 def _ocr_image(image_path: str) -> str:
+    """Run OCR on a single image and return extracted text."""
     _load_model()
     prompt = "<image>\nFree OCR. "
     tmpdir = tempfile.mkdtemp()
@@ -90,9 +85,14 @@ def _ocr_image(image_path: str) -> str:
 
 
 def extract_text(file_path: str) -> str:
+    """
+    Extract text from an image or PDF file.
+    PDFs are rendered page-by-page; pages are joined with blank lines.
+    """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
+
     ext = path.suffix.lower()
 
     if ext == ".pdf":
@@ -109,6 +109,8 @@ def extract_text(file_path: str) -> str:
 
     if ext not in SUPPORTED_IMAGES:
         raise ValueError(
-            f"Unsupported file type '{ext}'. Accepted: {', '.join(sorted(SUPPORTED_IMAGES | {'.pdf'}))}"
+            f"Unsupported file type '{ext}'. "
+            f"Accepted: {', '.join(sorted(SUPPORTED_IMAGES | {'.pdf'}))}"
         )
+
     return _ocr_image(file_path)
