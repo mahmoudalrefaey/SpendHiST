@@ -42,11 +42,13 @@ class ReceiptBase(BaseModel):
 
 
 class ReceiptCreate(ReceiptBase):
+    user_id: int
     items: List[ReceiptItemCreate]
 
 
 class ReceiptResponse(ReceiptBase):
     receipt_id: int
+    user_id: int
     created_at: datetime
     items: List[ReceiptItemResponse]
 

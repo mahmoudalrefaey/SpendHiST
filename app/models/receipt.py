@@ -20,6 +20,12 @@ class Receipt(Base):
     __tablename__ = "receipt"
 
     receipt_id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     merchant_name = Column(String(150), nullable=False)
     receipt_date = Column(DateTime(timezone=True), nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
@@ -29,6 +35,7 @@ class Receipt(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     raw_text = Column(Text)
 
+    user = relationship("User", back_populates="receipts")
     items = relationship(
         "ReceiptItem",
         back_populates="receipt",

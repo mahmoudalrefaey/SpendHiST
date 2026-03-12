@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import receipts as receipts_router
+from app.api.v1 import users as users_router
 
 app = FastAPI(
     title="SpendHiST",
@@ -21,3 +22,4 @@ app.add_middleware(
 )
 
 app.include_router(receipts_router.router)
+app.include_router(users_router.router)

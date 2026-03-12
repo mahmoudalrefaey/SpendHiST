@@ -15,9 +15,11 @@ UPLOAD_DIR = Path(RECEIPTS_IMG_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-async def process_uploaded_file(uploaded_file: UploadFile, db: Session) -> str:
+async def process_uploaded_file(
+    uploaded_file: UploadFile, db: Session, user_id: int
+) -> str:
     """
-    Save the file, run OCR, parse, persist to DB.
+    Save the file, run OCR, parse, persist to DB under user_id.
     Returns the saved filename.
     """
     name = Path(uploaded_file.filename or "unnamed").name
@@ -29,6 +31,7 @@ async def process_uploaded_file(uploaded_file: UploadFile, db: Session) -> str:
     parsed = parse_receipt_text(ocr_text)
 
     receipt = Receipt(
+        user_id=user_id,
         merchant_name=parsed["merchant_name"],
         receipt_date=parsed["receipt_date"],
         total_amount=parsed["total_amount"],

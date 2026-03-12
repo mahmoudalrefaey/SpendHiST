@@ -1,3 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "ai*"]
+
 [project]
 name = "spendhist"
 version = "0.1.0"
@@ -23,6 +31,9 @@ dependencies = [
     "huggingface-hub>=0.25.0",
     "transformers==4.46.3",
     "uvicorn>=0.41.0",
+    "langchain>=1.2.10",
+    "langgraph>=1.0.10",
+    "bcrypt>=4.0.0",
 ]
 
 # PyTorch CUDA 11.8: use this index only for torch/torchvision/torchaudio
@@ -41,4 +52,9 @@ torchvision = [
 ]
 torchaudio = [
     { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
 ]
