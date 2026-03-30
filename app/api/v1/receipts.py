@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db
+from app.core.dependencies import get_current_user_id, get_db
 from app.schemas.receipt import ReceiptCreate, ReceiptResponse
 from app.services import receipt_service, upload_service
 
@@ -13,27 +13,32 @@ router = APIRouter(prefix="/receipts", tags=["receipts"])
 
 
 @router.post("", response_model=ReceiptResponse, status_code=201)
-async def create_receipt(payload: ReceiptCreate, db: Session = Depends(get_db)):
-    """Create a receipt from a structured JSON payload (user_id required in body)."""
+async def create_receipt(
+    payload: ReceiptCreate,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Create a receipt from a structured JSON payload (user_id from JWT)."""
+    payload.user_id = user_id
     return receipt_service.create_receipt(db, payload)
 
 
 @router.get("", response_model=List[ReceiptResponse])
 async def list_receipts(
-    user_id: Optional[int] = Query(None, description="Filter receipts by user"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Return receipts; optionally scoped to a user."""
+    """Return receipts scoped to the authenticated user."""
     return receipt_service.list_receipts(db, user_id=user_id)
 
 
 @router.get("/search", response_model=List[ReceiptResponse])
 async def search_receipts(
-    q: Optional[str] = Query(None, description="Search term (merchant, items, currency, etc.)"),
-    user_id: Optional[int] = Query(None, description="Scope search to a user"),
+    q: Optional[str] = Query(None, description="Search term"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Full-text search across merchant name, items, currency, and raw OCR text."""
+    """Full-text search across receipts scoped to the authenticated user."""
     if not q or not q.strip():
         return []
     return receipt_service.search_receipts(db, q.strip(), user_id=user_id)
@@ -42,10 +47,10 @@ async def search_receipts(
 @router.get("/{receipt_id}", response_model=ReceiptResponse)
 async def get_receipt(
     receipt_id: int,
-    user_id: Optional[int] = Query(None, description="Scope lookup to a user"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Fetch a single receipt by ID; optionally scoped to a user."""
+    """Fetch a single receipt by ID scoped to the authenticated user."""
     receipt = receipt_service.get_receipt_by_id(db, receipt_id, user_id=user_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
@@ -55,10 +60,10 @@ async def get_receipt(
 @router.delete("/{receipt_id}")
 async def delete_receipt(
     receipt_id: int,
-    user_id: Optional[int] = Query(None, description="Scope deletion to a user"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Delete a single receipt and all its items; optionally scoped to a user."""
+    """Delete a single receipt scoped to the authenticated user."""
     receipt = receipt_service.delete_receipt_by_id(db, receipt_id, user_id=user_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
@@ -67,21 +72,21 @@ async def delete_receipt(
 
 @router.delete("")
 async def delete_all_receipts(
-    user_id: Optional[int] = Query(None, description="Delete only receipts belonging to a user"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Delete receipts; optionally scoped to a user."""
+    """Delete all receipts belonging to the authenticated user."""
     deleted = receipt_service.delete_all_receipts(db, user_id=user_id)
     return {"message": "Receipts deleted", "deleted": deleted}
 
 
 @router.post("/upload")
 async def upload_receipts(
-    user_id: int = Form(..., description="Owner user ID"),
     files: List[UploadFile] = File(...),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Upload image/PDF files, run OCR + parsing, and save receipts under user_id."""
+    """Upload image/PDF files, run OCR + parsing, save receipts for the authenticated user."""
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 

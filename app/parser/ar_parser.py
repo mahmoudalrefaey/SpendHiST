@@ -3,12 +3,13 @@
 import re
 from typing import Optional
 
+from app.config import HF_TOKEN, PARSER_MODEL
+from app.services.llm_service import load_llm
 from app.parser.en_parser import (
     _FIX_JSON_PROMPT,
     _coerce_types,
     _to_float,
     _try_parse_json,
-    load_qwen,
 )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -169,7 +170,11 @@ def parse_ar(raw_text: str) -> dict:
     Parse an Arabic or mixed-language receipt into a structured dict.
     Called by dispatcher.py.
     """
-    generate = load_qwen()
+    generate = load_llm(
+        model_name=PARSER_MODEL,
+        hf_token=HF_TOKEN,
+        default_system_prompt=_AR_SYSTEM_PROMPT,
+    )
 
     raw_response = generate(_AR_USER_PROMPT.format(raw_text=raw_text), system=_AR_SYSTEM_PROMPT)
     parsed = _try_parse_json(raw_response)

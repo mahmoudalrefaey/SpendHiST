@@ -9,9 +9,8 @@ import json
 import re
 from typing import Optional
 
-import torch
-
 from app.config import HF_TOKEN, PARSER_MODEL
+from app.services.llm_service import load_llm
 
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -122,73 +121,7 @@ Broken JSON:
 """
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  MODEL LOADER  (shared singleton — imported by ar_parser too)
-# ═════════════════════════════════════════════════════════════════════════════
-
-_client = None
-
-
-def load_qwen():
-    """
-    Return a callable:  prompt_str -> response_str.
-    Auto-selects local GPU (transformers) or HF Inference API fallback.
-    Cached globally so both parsers share the same loaded model.
-    """
-    global _client
-    if _client is not None:
-        return _client
-    if torch.cuda.is_available():
-        _client = _build_local_client()
-    else:
-        _client = _build_api_client()
-    return _client
-
-
-def _build_local_client():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(PARSER_MODEL, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        PARSER_MODEL,
-        trust_remote_code=True,
-        device_map="auto",
-        torch_dtype="auto",
-    ).eval()
-
-    def _generate(prompt: str, system: str = _SYSTEM_PROMPT) -> str:
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
-        ]
-        text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
-        )
-        inputs = tokenizer(text, return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=2048,
-                do_sample=False,
-                temperature=1.0,
-            )
-        generated = out[0][inputs["input_ids"].shape[1]:]
-        return tokenizer.decode(generated, skip_special_tokens=True)
-
-    return _generate
-
-
-def _build_api_client():
-    from huggingface_hub import InferenceClient
-
-    client = InferenceClient(model=PARSER_MODEL, token=HF_TOKEN or None)
-
-    def _generate(prompt: str, system: str = _SYSTEM_PROMPT) -> str:
-        full_prompt = f"[INST] <<SYS>>\n{system}\n<</SYS>>\n\n{prompt} [/INST]"
-        return client.text_generation(full_prompt, max_new_tokens=2048, temperature=0.1)
-
-    return _generate
-
+# LLM loading moved to app.services.llm_service (keeps parsers thin).
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  JSON HELPERS
@@ -396,7 +329,11 @@ def parse_en(raw_text: str) -> dict:
     Parse an English/Latin receipt into a structured dict.
     Called by dispatcher.py.
     """
-    generate = load_qwen()
+    generate = load_llm(
+        model_name=PARSER_MODEL,
+        hf_token=HF_TOKEN,
+        default_system_prompt=_SYSTEM_PROMPT,
+    )
     prompt = _USER_PROMPT.format(raw_text=raw_text)
     parsed = _try_parse_json(generate(prompt))
 

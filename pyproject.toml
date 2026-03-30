@@ -34,6 +34,7 @@ dependencies = [
     "langchain>=1.2.10",
     "langgraph>=1.0.10",
     "bcrypt>=4.0.0",
+    "langgraph-supervisor>=0.0.31",
 ]
 
 # PyTorch CUDA 11.8: use this index only for torch/torchvision/torchaudio

@@ -163,5 +163,3 @@ SpendHiST/
 | v0.4    | Agentic AI — upload pipeline   | Planned     |
 | v0.5    | Production hardening           | Planned     |
 | v1.0    | Multi-user release             | Planned     |
-
-See [`planning/roadmap.md`](planning/roadmap.md) for full details.

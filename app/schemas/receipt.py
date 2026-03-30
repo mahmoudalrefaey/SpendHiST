@@ -42,7 +42,7 @@ class ReceiptBase(BaseModel):
 
 
 class ReceiptCreate(ReceiptBase):
-    user_id: int
+    user_id: Optional[int] = None  # injected from JWT in the endpoint
     items: List[ReceiptItemCreate]
 
 
