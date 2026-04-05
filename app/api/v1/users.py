@@ -1,9 +1,10 @@
 """User endpoints — register, login, and user lookup."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user_id, get_db
+from app.core.rate_limit import limit_login, limit_register
 from app.core.security import create_access_token, verify_password
 from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserResponse
 from app.services import user_service
@@ -12,7 +13,12 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
-async def register_user(payload: UserCreate, db: Session = Depends(get_db)):
+@limit_register
+async def register_user(
+    request: Request,
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+):
     """Register a new user. Returns user profile (no password)."""
     if user_service.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -34,10 +40,12 @@ async def login_user(payload: UserLogin, db: Session = Depends(get_db)):
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
-    _: int = Depends(get_current_user_id),
+    current_user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Fetch a user by ID (requires authentication)."""
+    """Fetch the authenticated user's own profile only (prevents IDOR enumeration)."""
+    if user_id != current_user_id:
+        raise HTTPException(status_code=404, detail="User not found")
     user = user_service.get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

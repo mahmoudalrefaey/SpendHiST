@@ -1,5 +1,6 @@
 """Arabic receipt parser — shares model and helpers with en_parser."""
 
+import math
 import re
 from typing import Optional
 
@@ -89,6 +90,14 @@ def _extract_valid_total(raw_text: str) -> Optional[float]:
     return None
 
 
+def _total_matches_forbidden(current_total: float, forbidden: set) -> bool:
+    """Float-safe comparison (OCR/parsing can differ by tiny rounding)."""
+    for f in forbidden:
+        if math.isclose(current_total, f, rel_tol=1e-9, abs_tol=0.015):
+            return True
+    return False
+
+
 def _guard_arabic_totals(parsed: dict, raw_text: str) -> dict:
     """
     Post-processing guard for Arabic receipts:
@@ -100,11 +109,11 @@ def _guard_arabic_totals(parsed: dict, raw_text: str) -> dict:
     forbidden = _extract_paid_change_values(raw_text)
 
     current_total = _to_float(parsed.get("total_amount"))
-    if current_total is not None and current_total in forbidden:
+    if current_total is not None and _total_matches_forbidden(current_total, forbidden):
         parsed["total_amount"] = _extract_valid_total(raw_text)
 
     current_other = _to_float(parsed.get("other"))
-    if current_other is not None and current_other in forbidden:
+    if current_other is not None and _total_matches_forbidden(current_other, forbidden):
         parsed["other"] = None
 
     subtotal = _to_float(parsed.get("subtotal"))

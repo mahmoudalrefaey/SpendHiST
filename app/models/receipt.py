@@ -51,6 +51,7 @@ class ReceiptItem(Base):
         BigInteger,
         ForeignKey("receipt.receipt_id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     item_name = Column(String(150), nullable=False)
     quantity = Column(Integer, nullable=False)

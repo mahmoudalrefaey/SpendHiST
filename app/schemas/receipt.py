@@ -2,9 +2,15 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+class DeleteAllReceiptsBody(BaseModel):
+    """Required body for destructive bulk delete."""
+
+    confirm: Literal["DELETE_ALL_RECEIPTS"]
 
 
 class ReceiptItemBase(BaseModel):
@@ -50,3 +56,37 @@ class ReceiptResponse(ReceiptBase):
 
     class Config:
         from_attributes = True
+
+
+class ReceiptSummary(BaseModel):
+    """List/search row without line items (avoids N+1 and large payloads)."""
+
+    receipt_id: int
+    user_id: int
+    merchant_name: str
+    receipt_date: datetime
+    total_amount: Decimal
+    total_taxes: Decimal
+    other: Decimal
+    currency: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaginatedReceiptsResponse(BaseModel):
+    items: List[ReceiptSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class ReceiptSearchResponse(BaseModel):
+    """Capped full-text search; total is count of distinct matching receipts."""
+
+    items: List[ReceiptSummary]
+    total: int
+    limit: int
+    offset: int
+    include_raw_text_in_search: bool

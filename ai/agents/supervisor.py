@@ -1,5 +1,6 @@
 from langgraph_supervisor import create_supervisor
-from ai.tools import ALL_TOOLS
+
+from ai.tools import currency_tool
 from ai.agents.sql_agent import sql_agent
 from ai.agents.receipt_analyst import receipt_analyst_agent
 from app.config import AGENTIC_MODEL, G0I_API_KEY
@@ -13,6 +14,9 @@ supervisor_llm = ChatOpenAI(
 )
 
 checkpointer = InMemorySaver()
+
+# Narrow surface: heavy DB access goes through sql_agent + hardened db_tool only.
+SUPERVISOR_TOOLS = [currency_tool]
 
 
 def supervisor_invoke_config(*, thread_id: str, user_id: int) -> dict:
@@ -94,10 +98,10 @@ Step 4 — Reply to the user:
 """
 
 supervisor = create_supervisor(
-    model = supervisor_llm,
-    prompt = PROMPT,
-    tools = ALL_TOOLS,
-    agents = [sql_agent, receipt_analyst_agent],
-    add_handoff_back_messages = True,
-    output_mode = "full_history"
+    model=supervisor_llm,
+    prompt=PROMPT,
+    tools=SUPERVISOR_TOOLS,
+    agents=[sql_agent, receipt_analyst_agent],
+    add_handoff_back_messages=True,
+    output_mode="full_history",
 ).compile(checkpointer=checkpointer)

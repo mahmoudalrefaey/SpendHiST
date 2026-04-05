@@ -9,6 +9,8 @@ load_dotenv()
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set in .env")
+DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_POOL_MAX_OVERFLOW: int = int(os.getenv("DB_POOL_MAX_OVERFLOW", "10"))
 
 # ── OCR model ─────────────────────────────────────────────────────────────────
 MODEL_NAME_OCR: str = os.getenv("MODEL_NAME_OCR", "")
@@ -49,3 +51,29 @@ if not AGENTIC_MODEL:
 CURRENCYFREAKS_API_KEY: str = os.getenv("CURRENCYFREAKS_API_KEY", "")
 if not CURRENCYFREAKS_API_KEY:
     raise RuntimeError("CURRENCYFREAKS_API_KEY is not set in .env")
+
+# ── db_tool (sql_agent) guardrails ────────────────────────────────────────────
+DB_TOOL_MAX_LIMIT: int = int(os.getenv("DB_TOOL_MAX_LIMIT", "200"))
+DB_TOOL_MAX_JSON_BYTES: int = int(os.getenv("DB_TOOL_MAX_JSON_BYTES", "256000"))
+DB_TOOL_STATEMENT_TIMEOUT_MS: int = int(os.getenv("DB_TOOL_STATEMENT_TIMEOUT_MS", "8000"))
+
+# ── OCR device: cuda | cpu | auto (prefer CUDA if available) ──────────────────
+OCR_DEVICE: str = os.getenv("OCR_DEVICE", "auto").lower()
+
+# ── Upload limits ─────────────────────────────────────────────────────────────
+MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))  # 15 MiB
+MAX_PDF_PAGES: int = int(os.getenv("MAX_PDF_PAGES", "30"))
+
+# ── Receipt list / search defaults ────────────────────────────────────────────
+DEFAULT_RECEIPT_PAGE_SIZE: int = int(os.getenv("DEFAULT_RECEIPT_PAGE_SIZE", "20"))
+MAX_RECEIPT_PAGE_SIZE: int = int(os.getenv("MAX_RECEIPT_PAGE_SIZE", "100"))
+SEARCH_RESULTS_CAP: int = int(os.getenv("SEARCH_RESULTS_CAP", "50"))
+
+# ── CORS (comma-separated origins; empty = allow all, no credentials combo) ───
+CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
+
+# ── Rate limits (per client IP per minute; 0 = disabled) ──────────────────────
+RATE_LIMIT_REGISTER_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REGISTER_PER_MINUTE", "10"))
+RATE_LIMIT_LOGIN_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_LOGIN_PER_MINUTE", "20"))
+RATE_LIMIT_UPLOAD_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_UPLOAD_PER_MINUTE", "30"))
+RATE_LIMIT_CHAT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_CHAT_PER_MINUTE", "60"))

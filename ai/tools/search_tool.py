@@ -32,7 +32,7 @@ def search_tool(query: str, user_id: Optional[int] = None) -> str:
     """
     db = SessionLocal()
     try:
-        receipts = search_receipts(db, query, user_id=user_id)
+        receipts, _ = search_receipts(db, query, user_id=user_id)
         return _format_receipts(receipts)
     finally:
         db.close()

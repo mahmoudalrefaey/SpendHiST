@@ -2,11 +2,23 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user_id, get_db
-from app.schemas.receipt import ReceiptCreate, ReceiptResponse
+from app.core.rate_limit import limit_upload
+from app.config import (
+    DEFAULT_RECEIPT_PAGE_SIZE,
+    MAX_RECEIPT_PAGE_SIZE,
+    SEARCH_RESULTS_CAP,
+)
+from app.schemas.receipt import (
+    DeleteAllReceiptsBody,
+    PaginatedReceiptsResponse,
+    ReceiptCreate,
+    ReceiptResponse,
+    ReceiptSearchResponse,
+)
 from app.services import receipt_service, upload_service
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -23,25 +35,63 @@ async def create_receipt(
     return receipt_service.create_receipt(db, payload)
 
 
-@router.get("", response_model=List[ReceiptResponse])
+@router.get("", response_model=PaginatedReceiptsResponse)
 async def list_receipts(
+    limit: int = Query(default=DEFAULT_RECEIPT_PAGE_SIZE, ge=1, le=MAX_RECEIPT_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Return receipts scoped to the authenticated user."""
-    return receipt_service.list_receipts(db, user_id=user_id)
+    """Paginated receipt list (no line items); use GET /receipts/{id} for items."""
+    limit = min(limit, MAX_RECEIPT_PAGE_SIZE)
+    rows, total = receipt_service.list_receipts_page(
+        db, user_id, limit=limit, offset=offset
+    )
+    return PaginatedReceiptsResponse(
+        items=rows,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
-@router.get("/search", response_model=List[ReceiptResponse])
+@router.get("/search", response_model=ReceiptSearchResponse)
 async def search_receipts(
     q: Optional[str] = Query(None, description="Search term"),
+    limit: int = Query(default=SEARCH_RESULTS_CAP, ge=1, le=MAX_RECEIPT_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+    include_raw: bool = Query(
+        default=True,
+        description="If false, skip matching on raw_text (faster at scale).",
+    ),
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Full-text search across receipts scoped to the authenticated user."""
+    """Search receipts (capped). Omits line items; use GET /receipts/{id} for detail."""
     if not q or not q.strip():
-        return []
-    return receipt_service.search_receipts(db, q.strip(), user_id=user_id)
+        return ReceiptSearchResponse(
+            items=[],
+            total=0,
+            limit=limit,
+            offset=offset,
+            include_raw_text_in_search=include_raw,
+        )
+    limit = min(limit, MAX_RECEIPT_PAGE_SIZE)
+    rows, total = receipt_service.search_receipts(
+        db,
+        q.strip(),
+        user_id=user_id,
+        include_raw=include_raw,
+        limit=limit,
+        offset=offset,
+    )
+    return ReceiptSearchResponse(
+        items=rows,
+        total=total,
+        limit=limit,
+        offset=offset,
+        include_raw_text_in_search=include_raw,
+    )
 
 
 @router.get("/{receipt_id}", response_model=ReceiptResponse)
@@ -72,16 +122,19 @@ async def delete_receipt(
 
 @router.delete("")
 async def delete_all_receipts(
+    body: DeleteAllReceiptsBody,
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Delete all receipts belonging to the authenticated user."""
+    """Delete all receipts for the user; requires explicit confirmation in JSON body."""
     deleted = receipt_service.delete_all_receipts(db, user_id=user_id)
     return {"message": "Receipts deleted", "deleted": deleted}
 
 
 @router.post("/upload")
+@limit_upload
 async def upload_receipts(
+    request: Request,
     files: List[UploadFile] = File(...),
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),

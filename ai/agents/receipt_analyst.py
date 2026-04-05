@@ -1,14 +1,15 @@
 from langgraph.prebuilt import create_react_agent
 from app.config import AGENTIC_MODEL, G0I_API_KEY
 from langchain_openai import ChatOpenAI
-from ai.tools import currency_tool, db_tool, search_tool
+from ai.tools import currency_tool, search_tool
 
 receipt_analyst_llm = ChatOpenAI(
     model= AGENTIC_MODEL,
     base_url="https://g0i.shop/v1",
     api_key=G0I_API_KEY,
 )
-receipt_analyst_tools = [currency_tool, db_tool, search_tool]
+# db_tool is sql_agent-only; analyst works from rows already fetched.
+receipt_analyst_tools = [currency_tool, search_tool]
 llm_with_tools = receipt_analyst_llm.bind_tools(receipt_analyst_tools)
 
 PROMPT = """
@@ -23,17 +24,18 @@ The supervisor will paraphrase your JSON into a user-friendly reply — you do N
 == YOUR TOOLS ==
 - currency_tool: convert amounts when the user asks or when receipts contain mixed
   currencies. Always include both original and converted values in your JSON output.
-- search_tool: look up current market prices when the user wants to compare
-  what they paid vs. market rates. Include the market price in your JSON output.
+- search_tool: search this user's saved receipts in the database (merchant names,
+  line items, currency, raw OCR text). Use it to pull extra matching receipts when
+  the provided rows are not enough. Results are receipt records, not external prices.
 
 == ANALYSIS STEPS ==
-1. Read the raw data rows. Do NOT call db_tool — data is already provided.
+1. Read the raw data rows — that is your primary source; do not assume more data exists.
 2. Perform the requested computation:
    - Totals / averages / counts  → calculate from the rows.
    - Trends over time            → group by period, compute delta %.
    - Rankings                    → sort by amount, extract top N.
    - Currency conversion         → call currency_tool, include both values.
-   - Price comparison            → call search_tool, include market price.
+   - Need more matching receipts → call search_tool, then merge with provided rows.
 
 == OUTPUT FORMAT ==
 Always return a single JSON object. Choose fields that match the analysis:
@@ -44,7 +46,7 @@ For totals / summaries:
   "total_amount": 1234.50,
   "currency": "USD",
   "converted_amount": 38270.00,       // only if currency_tool was used
-  "converted_currency": "EGP",        // only if currency_tool was used
+  "converted_currency": "EGP",       // only if currency_tool was used
   "period": "2024-03",                // if time-scoped
   "receipt_count": 8,
   "top_merchants": [
@@ -84,8 +86,8 @@ For trends:
 """
 
 receipt_analyst_agent = create_react_agent(
-    model = llm_with_tools,
-    prompt = PROMPT,
-    tools = [currency_tool, db_tool, search_tool],
-    name = "receipt_analyst_agent",
+    model=llm_with_tools,
+    prompt=PROMPT,
+    tools=[currency_tool, search_tool],
+    name="receipt_analyst_agent",
 )
