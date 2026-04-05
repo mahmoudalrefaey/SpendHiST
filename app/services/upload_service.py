@@ -10,7 +10,6 @@ from app.models.receipt import Receipt, ReceiptItem
 from app.ocr.engine import extract_text
 from app.parser.dispatcher import parse_receipt_text
 
-# Ensure upload directory exists at import time
 UPLOAD_DIR = Path(RECEIPTS_IMG_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 

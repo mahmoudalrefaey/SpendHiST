@@ -1,4 +1,4 @@
-"""User endpoints — register, login, and profile."""
+"""User endpoints — register, login, and user lookup."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -29,18 +29,6 @@ async def login_user(payload: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Account is inactive")
     token = create_access_token(user.user_id)
     return TokenResponse(access_token=token, user_id=user.user_id)
-
-
-@router.get("/me", response_model=UserResponse)
-async def get_me(
-    user_id: int = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-):
-    """Return the profile of the currently authenticated user."""
-    user = user_service.get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 
 @router.get("/{user_id}", response_model=UserResponse)

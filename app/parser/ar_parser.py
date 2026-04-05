@@ -3,8 +3,7 @@
 import re
 from typing import Optional
 
-from app.config import HF_TOKEN, PARSER_MODEL
-from app.services.llm_service import load_llm
+from app.parser.chat_llm import parser_invoke
 from app.parser.en_parser import (
     _FIX_JSON_PROMPT,
     _coerce_types,
@@ -33,70 +32,25 @@ _TOTAL_LABELS = [
 # ═════════════════════════════════════════════════════════════════════════════
 
 _AR_SYSTEM_PROMPT = """\
-You are a receipt parsing engine specialized in Arabic and mixed-language receipts. \
-Output valid JSON only. No markdown, no explanation, no extra keys. \
-If a value is unknown use null — EXCEPT merchant_name which must NEVER be null.
+Single JSON object only — no markdown, no extra keys.
 
-Critical reasoning rules (internal only, never shown in output):
-- merchant_name is REQUIRED. Infer from: business name at top or bottom, \
-"Powered by X" footer (use X), brand name. Never output null for merchant_name.
-- Item price columns may be unit price OR line total. Test both interpretations \
-and pick the one whose sum matches subtotal/الإجمالي/المجموع.
-- Do NOT include these as JSON fields or values: \
-المدفوع، الباقي، الباقي عليه، الباقي لك، المتبقي، الفرق، \
-paid, cash, change, balance, remaining. \
-These are payment/change lines — completely ignore their numbers.
-- total_amount must come ONLY from labels: \
-الإجمالي / الاجمالي / الإجمالى / المجموع / Total / Grand Total. \
-Do not use the number from المدفوع or الباقي as total_amount under any circumstances.
-- other: tips, service charges, delivery fees only. NOT paid/change lines.
-- Dates: normalize to YYYY-MM-DD.
-- Currency: EGP / ج.م / جنيه / LE → "EGP"; $ → "USD"; € → "EUR"; etc.
-- Non-item lines (الإجمالي، المجموع، ضريبة، المدفوع، الباقي، etc.) \
-must NOT appear as items.
+Schema:
+{"merchant_name":string,"receipt_date":"YYYY-MM-DD"|null,"currency":"XXX"|null,"subtotal":num|null,"total_taxes":num|null,"other":num|null,"total_amount":num|null,"items":[{"item_name":string,"quantity":int>=1,"unit_price":num,"line_total":num}]}
 
-Output: JSON only. No chain-of-thought.\
+Arabic/mixed receipts:
+- merchant_name required (infer top/bottom/Powered by); other unknowns → null.
+- Never use numbers from المدفوع/الباقي/المتبقي/الفرق or paid/cash/change/balance for total_amount or other.
+- total_amount only from الإجمالي|الاجمالي|الإجمالى|المجموع|Total|Grand Total.
+- other: tips/service/delivery only — not paid/change.
+- Item price: if ambiguous, choose unit vs line so Σ line_totals matches subtotal/إجمالي.
+- Exclude totals, tax, payment lines from items. Currency: ج.م/LE/جنيه→EGP; $€£ as usual.
+
 """
 
 _AR_USER_PROMPT = """\
-Extract structured receipt data from the following Arabic/mixed OCR text.
-
-OCR TEXT:
 <<<
 {raw_text}
 >>>
-
-Rules:
-- Output JSON only (no markdown fences, no explanation).
-- Schema:
-  {{
-    "merchant_name": "string (REQUIRED, never null)",
-    "receipt_date": "YYYY-MM-DD or null",
-    "currency": "3-letter code or null",
-    "subtotal": number or null,
-    "total_taxes": number or null,
-    "other": number or null,
-    "total_amount": number or null,
-    "items": [
-      {{
-        "item_name": "string",
-        "quantity": integer (minimum 1),
-        "unit_price": number (required),
-        "line_total": number (required)
-      }}
-    ]
-  }}
-
-CRITICAL — Arabic-specific rules:
-- المدفوع / الباقي / الباقي عليه / الباقي لك / المتبقي / الفرق / paid / cash / change:
-  IGNORE COMPLETELY. Do NOT use their numbers anywhere in the JSON.
-- total_amount must come from: الإجمالي / الاجمالي / المجموع / Total / Grand Total only.
-- other: delivery fees, tips, service charges only — NOT paid/change.
-- Items: extract name, qty, unit_price, line_total. Test unit-price vs line-total \
-interpretation using the total to decide.
-- Use null for unknown values except merchant_name.
-
-Return final JSON only.\
 """
 
 
@@ -170,18 +124,15 @@ def parse_ar(raw_text: str) -> dict:
     Parse an Arabic or mixed-language receipt into a structured dict.
     Called by dispatcher.py.
     """
-    generate = load_llm(
-        model_name=PARSER_MODEL,
-        hf_token=HF_TOKEN,
-        default_system_prompt=_AR_SYSTEM_PROMPT,
-    )
-
-    raw_response = generate(_AR_USER_PROMPT.format(raw_text=raw_text), system=_AR_SYSTEM_PROMPT)
+    user_prompt = _AR_USER_PROMPT.format(raw_text=raw_text)
+    raw_response = parser_invoke(user_prompt, system_prompt=_AR_SYSTEM_PROMPT)
     parsed = _try_parse_json(raw_response)
 
     if parsed is None:
         fix_prompt = _FIX_JSON_PROMPT.format(broken_json=raw_response)
-        parsed = _try_parse_json(generate(fix_prompt, system=_AR_SYSTEM_PROMPT))
+        parsed = _try_parse_json(
+            parser_invoke(fix_prompt, system_prompt=_AR_SYSTEM_PROMPT)
+        )
 
     if parsed is None:
         parsed = {

@@ -1,5 +1,5 @@
 """
-en_parser.py — English receipt parser using Qwen2.5-1.5B-Instruct.
+en_parser.py — English receipt parser via OpenAI-compatible chat API (G0I).
 
 Handles English and Latin-script receipts.
 Called by dispatcher.py; do not call directly from the pipeline.
@@ -9,8 +9,7 @@ import json
 import re
 from typing import Optional
 
-from app.config import HF_TOKEN, PARSER_MODEL
-from app.services.llm_service import load_llm
+from app.parser.chat_llm import parser_invoke
 
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -18,110 +17,36 @@ _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 #  PROMPTS
 # ═════════════════════════════════════════════════════════════════════════════
 
+# Compact prompts: one system block (rules + schema), user = OCR only → fewer tokens per call.
+
 _SYSTEM_PROMPT = """\
-You are a receipt parsing engine. You must output valid JSON only that matches \
-the provided schema. Do not include explanations, markdown, or extra keys. \
-If a value is unknown, use null — EXCEPT merchant_name: it must NEVER be null.
+You output a single JSON object only — no markdown, no keys beyond the schema.
 
-Critical reasoning rules (use internally, never show your reasoning):
-- merchant_name is REQUIRED. Always infer it from the receipt text. Look for: \
-the store or business name at the top; "Powered by X" or "by X" at the bottom \
-(then use "X" as merchant_name); brand name; restaurant or shop name; footer \
-logos or text. If only a platform name like "Foodics" appears, use that. \
-Never output null for merchant_name.
-- Receipts vary widely in layout and language (English/Arabic/mixed).
-- Item price columns may represent unit price OR line total.
-- You MUST test both interpretations when quantity > 1 appears and choose the one \
-that best matches subtotal/total in the receipt.
-  Interpretation A: shown price = unit_price, so line_total = qty * shown_price.
-  Interpretation B: shown price = line_total, so unit_price = shown_price / qty.
-  Sum all line_totals under each interpretation. The one whose sum is closest to \
-the receipt subtotal (or total minus taxes) is correct.
-- Before finalizing JSON, cross-check:
-  * Sum of item line_totals should be close to subtotal (if subtotal exists).
-  * subtotal + taxes should be close to total (if both exist).
-- If mismatch is large, revise your extraction (especially unit-vs-line price \
-interpretation) and re-check.
-- Non-item lines (Subtotal, Total, VAT, Tax, Cash, Change, Thank you) must NOT appear as items.
-- Dates: normalize to YYYY-MM-DD.
-- Currency: detect from symbols/keywords in the receipt text.
-  * $ → "USD",
-  * € → "EUR",
-  * £ → "GBP",
-  * EGP, LE, ج.م, جنيه → "EGP"
-  * SAR, ر.س, ريال → "SAR"
-  * AED, د.إ, درهم → "AED"
-  * ₹, Rs, INR → "INR"
-  * If no symbol found, use null.
-- "other": sum of all extra charges that are NOT items and NOT tax/VAT. \
-This includes tips, service charges, delivery fees, gratuity, surcharges, etc. \
-If none found, use null.
-- Quantity defaults to 1 if not shown. Quantity can be a decimal (weights).
+Schema:
+{"merchant_name":string,"receipt_date":"YYYY-MM-DD"|null,"currency":"XXX"|null,"subtotal":num|null,"total_taxes":num|null,"other":num|null,"total_amount":num|null,"items":[{"item_name":string,"quantity":int>=1,"unit_price":num,"line_total":num}]}
 
-Output: JSON only. No chain-of-thought. No commentary.\
+Rules:
+- merchant_name: required non-empty string; infer from header, footer, "Powered by X", or brand (never null).
+- Unknown scalars → null. quantity default 1 (round fractional qty to int ≥1). Derive missing unit_price or line_total from the other using qty.
+- Shown item price may be unit or line: when ambiguous (esp. qty>1), pick the reading where Σ line_totals matches subtotal/total on the slip.
+- Do not list subtotal, tax/VAT, total, cash, change, or thanks lines as items.
+- other: tips, service, delivery only (not tax). Cross-check subtotal+taxes≈total when those lines exist.
+
+Currency (else null): $ USD, € EUR, £ GBP, EGP/LE/ج.م/جنيه EGP, SAR/ريال SAR, AED/درهم AED, ₹/Rs INR.
 """
 
 _USER_PROMPT = """\
-Extract structured receipt data from the following OCR text.
-
-OCR TEXT:
 <<<
 {raw_text}
 >>>
-
-Rules:
-- Output JSON only (no markdown fences, no explanation).
-- Follow this schema exactly:
-  {{
-    "merchant_name": "string (REQUIRED — never null; infer from store name, 'Powered by X', brand, or any business name on the receipt)",
-    "receipt_date": "YYYY-MM-DD or null",
-    "currency": "3-letter code or null",
-    "subtotal": number or null,
-    "total_taxes": number or null,
-    "other": number or null (tips, service charges, delivery fees, gratuity — NOT items, NOT tax),
-    "total_amount": number or null,
-    "items": [
-      {{
-        "item_name": "string",
-        "quantity": integer (default 1, must be > 0),
-        "unit_price": number (required, compute if needed),
-        "line_total": number (required, compute if needed)
-      }}
-    ]
-  }}
-- quantity must be a whole integer (round if decimal, minimum 1).
-- unit_price and line_total are required for every item. If one is missing, \
-compute it from the other: line_total = quantity * unit_price.
-
-- Items: detect qty, description, and shown price for each item line.
-- IMPORTANT: The shown "price" in item lines may be unit price OR line total.
-  Try both:
-    A) line_total = qty * shown_price  (shown_price is unit_price)
-    B) line_total = shown_price, unit_price = shown_price / qty  (shown_price is line_total)
-  Choose the interpretation whose sum of line_totals aligns best with the \
-receipt subtotal or total.
-- If totals exist and your computed sum disagrees strongly, revise your \
-interpretation and correct the items before outputting.
-- Do NOT include summary lines (subtotal, total, tax, payment, etc.) as items.
-- merchant_name: REQUIRED. Never use null. Infer from header, footer, "Powered by X", \
-or any business/brand name on the receipt.
-- Use null for other missing values. Do not invent data.
-
-Return final JSON only.\
 """
 
 _FIX_JSON_PROMPT = """\
-The following text was supposed to be valid JSON but has syntax errors.
-Fix it and return ONLY the corrected JSON. No explanation, no markdown fences.
+Fix to valid JSON only (same object shape). No markdown or text outside the object.
 
-Broken JSON:
-\"\"\"
 {broken_json}
-\"\"\"
 """
 
-
-# LLM loading moved to app.services.llm_service (keeps parsers thin).
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  JSON HELPERS
@@ -329,17 +254,15 @@ def parse_en(raw_text: str) -> dict:
     Parse an English/Latin receipt into a structured dict.
     Called by dispatcher.py.
     """
-    generate = load_llm(
-        model_name=PARSER_MODEL,
-        hf_token=HF_TOKEN,
-        default_system_prompt=_SYSTEM_PROMPT,
-    )
     prompt = _USER_PROMPT.format(raw_text=raw_text)
-    parsed = _try_parse_json(generate(prompt))
+    raw_response = parser_invoke(prompt, system_prompt=_SYSTEM_PROMPT)
+    parsed = _try_parse_json(raw_response)
 
     if parsed is None:
-        fix_prompt = _FIX_JSON_PROMPT.format(broken_json=generate(prompt))
-        parsed = _try_parse_json(generate(fix_prompt))
+        fix_prompt = _FIX_JSON_PROMPT.format(broken_json=raw_response)
+        parsed = _try_parse_json(
+            parser_invoke(fix_prompt, system_prompt=_SYSTEM_PROMPT)
+        )
 
     if parsed is None:
         parsed = {

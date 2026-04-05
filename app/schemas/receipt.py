@@ -7,8 +7,6 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
-# ── Item schemas ──────────────────────────────────────────────────────────────
-
 class ReceiptItemBase(BaseModel):
     item_name: str = Field(..., max_length=150)
     quantity: int = Field(..., gt=0)
@@ -28,8 +26,6 @@ class ReceiptItemResponse(ReceiptItemBase):
     class Config:
         from_attributes = True
 
-
-# ── Receipt schemas ───────────────────────────────────────────────────────────
 
 class ReceiptBase(BaseModel):
     merchant_name: str = Field(..., max_length=150)

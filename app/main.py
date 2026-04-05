@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1 import chat as chat_router
 from app.api.v1 import receipts as receipts_router
 from app.api.v1 import users as users_router
 
@@ -12,7 +13,6 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow all origins during development — tighten in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,5 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(chat_router.router)
 app.include_router(receipts_router.router)
 app.include_router(users_router.router)
